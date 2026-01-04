@@ -53,3 +53,22 @@ export async function deleteSession() {
   const cookieStore = await cookies();
   cookieStore.delete("session");
 }
+
+export async function verifySession() {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("session")?.value;
+  const session = await decrypt(sessionCookie);
+
+  if (!session?.userId) {
+    return { isAuth: false, user: null };
+  }
+
+  return {
+    isAuth: true,
+    user: {
+      id: session.userId as string,
+      email: session.email as string,
+      name: session.name as string,
+    },
+  };
+}

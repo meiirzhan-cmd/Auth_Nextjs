@@ -166,6 +166,7 @@ Auth_Nextjs/
 │   ├── schema.prisma        # Database schema
 │   └── generated/           # Generated Prisma Client
 ├── .env                     # Environment variables (create this)
+├── middleware.ts            # Route protection middleware
 ├── package.json             # Dependencies and scripts
 └── tsconfig.json            # TypeScript configuration
 ```
@@ -200,6 +201,43 @@ Auth_Nextjs/
 - Tokens are encrypted using HS256 algorithm
 - Sessions can be verified and decrypted server-side
 
+### Middleware Protection
+
+The application uses Next.js middleware (`middleware.ts`) to protect routes:
+
+- **Public Routes** (`/`): Accessible to everyone
+- **Auth Routes** (`/login`, `/signup`): Redirect authenticated users to `/home`
+- **Protected Routes** (`/home`): Redirect unauthenticated users to `/login`
+
+The middleware automatically:
+- Verifies JWT sessions from cookies
+- Redirects users based on authentication state
+- Preserves the original URL for post-login redirect
+
+### Authentication Context
+
+The app provides a React Context for accessing user authentication state:
+
+```tsx
+"use client";
+import { useAuth } from "@/components/auth/AuthChecker";
+
+export default function MyComponent() {
+  const { user, isAuthenticated } = useAuth();
+
+  if (isAuthenticated) {
+    return <div>Welcome, {user.name}!</div>;
+  }
+
+  return <div>Please log in</div>;
+}
+```
+
+The `AuthProvider` wraps the entire app in `app/layout.tsx` and:
+- Verifies session on server-side
+- Provides user data to all client components
+- Updates automatically when session changes
+
 ## 🔒 Security Features
 
 - **Password Hashing**: bcrypt with salting
@@ -208,6 +246,8 @@ Auth_Nextjs/
 - **SameSite Policy**: CSRF protection
 - **JWT Encryption**: Signed tokens with secret key
 - **Server-Only Code**: Sensitive operations marked with "server-only"
+- **Middleware Protection**: Route-level authentication enforcement
+- **Automatic Redirects**: Prevents unauthorized access to protected routes
 
 ## 🎨 Styling
 
