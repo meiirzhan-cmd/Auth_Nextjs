@@ -1,11 +1,12 @@
 "use server";
 
-import { FormState, SignupFormSchema } from "@/lib/definitions";
+import { FormState, SignupFormSchema } from "@/lib/signup/definitions";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import * as z from "zod";
+import { createSession } from "@/lib/session";
 
-export async function signup(
+export default async function signup(
   state: FormState,
   formData: FormData
 ): Promise<FormState> {
@@ -49,6 +50,8 @@ export async function signup(
         password: hashedPassword,
       },
     });
+
+    await createSession(user);
 
     return {
       success: true,
