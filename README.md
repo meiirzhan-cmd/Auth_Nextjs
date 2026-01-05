@@ -6,6 +6,12 @@ A modern authentication and authorization system built with Next.js 16, Prisma 7
 
 This project implements a secure authentication system with JWT-based session management, password hashing, and form validation. It demonstrates best practices for building authentication flows in Next.js using the App Router architecture.
 
+**Security Architecture:**
+- **Proxy Pattern** - Optimistic auth checks with middleware (no database queries)
+- **Data Access Layer (DAL)** - Centralized secure auth verification
+- **Data Transfer Objects (DTOs)** - Permission-based data exposure
+- **Server Actions** - Mutation protection with auth verification
+
 ## ✨ Features
 
 - **User Authentication**
@@ -29,6 +35,13 @@ This project implements a secure authentication system with JWT-based session ma
   - Custom components for auth flows
   - Loading states and error handling
   - Route groups for organized page structure
+
+- **Security Architecture**
+  - Proxy pattern for optimistic checks (middleware)
+  - Data Access Layer (DAL) for secure operations
+  - Data Transfer Objects (DTOs) for safe data exposure
+  - React cache for performance optimization
+  - Defense-in-depth approach
 
 ## 🛠️ Tech Stack
 
@@ -205,18 +218,53 @@ Auth_Nextjs/
 - Tokens are encrypted using HS256 algorithm
 - Sessions can be verified and decrypted server-side
 
-### Middleware Protection
+### Proxy Pattern (Optimistic Checks with Middleware)
 
-The application uses Next.js middleware (`middleware.ts`) to protect routes:
+The application uses Next.js middleware as a **Proxy** (`middleware.ts`) for optimistic authentication checks:
 
+**Route Configuration:**
 - **Public Routes** (`/`): Accessible to everyone
 - **Auth Routes** (`/login`, `/signup`): Redirect authenticated users to `/home`
 - **Protected Routes** (`/home`): Redirect unauthenticated users to `/login`
 
-The middleware automatically:
-- Verifies JWT sessions from cookies
-- Redirects users based on authentication state
-- Preserves the original URL for post-login redirect
+**How the Proxy Works:**
+
+```typescript
+// middleware.ts - Runs on EVERY route (including prefetched)
+export default async function middleware(req: NextRequest) {
+  // 1. Decrypt session from cookie (optimistic check)
+  const cookie = req.cookies.get("session")?.value;
+  const session = await decrypt(cookie);
+
+  // 2. Redirect to /login if not authenticated
+  if (isProtectedRoute && !session?.userId) {
+    return NextResponse.redirect(new URL("/login", req.nextUrl));
+  }
+
+  // 3. Redirect to /home if authenticated
+  if (isAuthRoute && session?.userId) {
+    return NextResponse.redirect(new URL("/home", req.nextUrl));
+  }
+
+  return NextResponse.next();
+}
+```
+
+**Key Characteristics:**
+- ✅ Performs **optimistic checks** (reads session from cookie only)
+- ✅ **No database queries** - fast performance on every route
+- ✅ Runs on prefetched routes - good for UX
+- ✅ Centralizes redirect logic
+- ✅ Pre-filters unauthorized users
+- ⚠️ **NOT for security alone** - always verify in DAL/Server Actions
+
+**When to Use Proxy:**
+- Perform initial route access checks
+- Centralize redirect logic
+- Protect static routes that share data between users
+- Improve UX by early redirects
+
+**Important:** Since the proxy runs on every route, it only reads from the cookie to avoid performance issues. For secure operations, always use the Data Access Layer (DAL) to verify against the database.
 
 ### Authentication Context
 
@@ -329,7 +377,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
 - **7-Day Expiration**: Automatic session timeout
 
 ### Authorization & Access Control
-- **Middleware Protection**: Optimistic route-level checks (no database queries)
+- **Proxy Pattern (Middleware)**: Optimistic route-level checks (cookie-only, no database)
 - **Data Access Layer**: Centralized auth verification for all data operations
 - **React Cache Memoization**: Prevents duplicate auth checks in single render
 - **Server-Only Code**: Sensitive operations marked with "server-only" directive
@@ -342,7 +390,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
 - **Server Actions Auth**: Every mutation verified server-side
 
 ### Defense in Depth
-1. **Middleware** - Fast optimistic checks (cookie only)
+1. **Proxy (Middleware)** - Fast optimistic checks (cookie only)
 2. **DAL** - Secure checks at data layer (verifies + fetches)
 3. **Server Actions** - Auth verification before mutations
 4. **DTOs** - Field-level permission checks
@@ -351,7 +399,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
 - ✅ Auth checks as close to data source as possible
 - ✅ Never trust client-side checks alone
 - ✅ All Server Actions verify session
-- ✅ Middleware only for UX optimization
+- ✅ Proxy only for UX optimization (not security)
 - ✅ Database queries only in DAL/DTOs
 - ✅ Sensitive data never exposed to client
 
@@ -359,15 +407,24 @@ export default async function ProfilePage({ params }: { params: { id: string } }
 
 This application implements a multi-layered security approach following Next.js best practices:
 
-### Layer 1: Middleware (Optimistic Checks)
+### Layer 1: Proxy (Optimistic Checks with Middleware)
 
 ```typescript
-// middleware.ts - Fast, cookie-only checks
+// middleware.ts - Fast, cookie-only checks (proxy pattern)
 - Runs on EVERY route (including prefetched)
 - Only reads session from cookie (no database)
 - Redirects based on authentication state
 - Good for UX, NOT for security alone
+- Centralizes redirect logic and pre-filters unauthorized users
 ```
+
+**Why use a Proxy?**
+- Perform optimistic checks for better UX
+- Protect static routes that share data between users
+- Centralize redirect logic in one place
+- Pre-filter unauthorized users before components render
+
+**Important:** Since the proxy runs on every route (including prefetched), it only reads from cookies to avoid performance issues. Never use it as your only security layer.
 
 ### Layer 2: Data Access Layer (Secure Checks)
 
@@ -402,15 +459,16 @@ This application implements a multi-layered security approach following Next.js 
 ### Example: Complete Security Flow
 
 ```tsx
-// 1. Middleware catches route access
+// 1. Proxy (Middleware) catches route access - OPTIMISTIC CHECK
 export default async function middleware(req: NextRequest) {
   const session = await decrypt(req.cookies.get("session")?.value);
   if (!session && isProtectedRoute) {
     return NextResponse.redirect("/login");
   }
+  // No database query here - fast performance
 }
 
-// 2. Server Component verifies via DAL
+// 2. Server Component verifies via DAL - SECURE CHECK
 export default async function Page() {
   const session = await verifySession(); // Redirects if invalid
   const user = await getUser(); // Fetches with auth check
@@ -438,39 +496,45 @@ export async function getProfileDTO(userId: string) {
 
 1. **Never trust the client** - Always verify server-side
 2. **Check close to data** - Auth checks in DAL, not in layouts
-3. **Middleware is optimistic** - For UX only, not security
+3. **Proxy is optimistic** - For UX only, not security
 4. **Cache strategically** - React cache prevents duplicate checks
 5. **Explicit > Implicit** - SELECT specific columns, not *
 6. **Fail securely** - Redirect/return null on auth failure
+7. **No DB in proxy** - Middleware should only read cookies for performance
 
 ### Common Pitfalls to Avoid
 
 ❌ **Don't do this:**
 ```tsx
-// Checking auth only in middleware
+// Checking auth only in proxy (middleware)
 export default async function middleware(req) {
   if (!session) redirect("/login");
 }
 
-// Then assuming auth in Server Component
+// Then assuming auth in Server Component - DANGEROUS!
 export default async function Page() {
   const user = await prisma.user.findMany(); // No auth check!
 }
 ```
 
+**Why this is wrong:** The proxy only does optimistic checks. An attacker could bypass it or the cookie could be invalid.
+
 ✅ **Do this instead:**
 ```tsx
-// Middleware for UX
+// Proxy for UX (optional but recommended)
 export default async function middleware(req) {
+  const session = await decrypt(req.cookies.get("session")?.value);
   if (!session) redirect("/login");
 }
 
-// ALSO verify in component
+// ALSO verify in component (REQUIRED for security)
 export default async function Page() {
-  await verifySession(); // Required!
-  const user = await getUser(); // With auth check
+  await verifySession(); // Required - redirects if invalid
+  const user = await getUser(); // With auth check + database verification
 }
 ```
+
+**Why this is correct:** Defense in depth - proxy improves UX, DAL provides security.
 
 ## 🎨 Styling
 
